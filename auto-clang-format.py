@@ -3,8 +3,12 @@
 import BaseHTTPServer
 import json
 import subprocess
+import threading
 
-clang_format_diff_path = '/usr/local/Cellar/clang-format/2018-01-11/share/clang/clang-format-diff.py'
+BITBUCKET_PORT = 2232
+GITHUB_PORT = 2233
+CLANG_FORMAT_DIFF_PATH = '/usr/local/Cellar/clang-format/2018-01-11/share/clang/clang-format-diff.py'
+COMMIT_MESSAGE = '[AUTO] :triumph: clang-format'
 
 # Run git -C {project_dir} diff HEAD^ HEAD | clang-format-diff -i -v -p1 -iregex {regex_pattern}
 def run_clang_format(project_dir, regex_pattern):
@@ -16,7 +20,7 @@ def run_clang_format(project_dir, regex_pattern):
     ]
     args1 = [
         'python',
-        clang_format_diff_path,
+        CLANG_FORMAT_DIFF_PATH,
         '-i',
         '-p',
         '1',
@@ -28,35 +32,44 @@ def run_clang_format(project_dir, regex_pattern):
         'file'
     ]
     print 'cwd = %s' % project_dir
-    print ' '.join(args0 + ['|'] + args1)
+    print 'full command line = %s' % (' '.join(args0 + ['|'] + args1))
 
     p0 = subprocess.Popen(args0, cwd=project_dir, stdout=subprocess.PIPE)
     p0.wait()
+    # print 'result = %s' % p0.communicate()[0]
 
+    # Pass output from git diff to clang-format-diff.
     p1 = subprocess.Popen(args1, cwd=project_dir, stdin=p0.stdout, stdout=subprocess.PIPE)
     p0.stdout.close()
     p1.wait()
 
-    print 'command line = %s' % subprocess.list2cmdline(args1)
+    print 'clang-format-diff command line = %s' % subprocess.list2cmdline(args1)
     print 'result = %s' % p1.communicate()[0]
 
-def process_data(data, repository, project_dir, regex_pattern):
-    ref = data['ref']
-    if 'master' not in ref:
+def parse_github_data(data):
+    branch = data['ref'] # ref/heads/master or ref/heads/dev
+    message = data['commits'][0]['message']
+    name = data['repository']['full_name']
+    return branch, message, name
+
+def parse_bitbucket_data(data):
+    branch = data['push']['changes'][0]['new']['name'] # master or dev
+    message = data['push']['changes'][0]['new']['target']['message']
+    name = data['repository']['full_name']
+    return branch, message, name
+
+def process_data(data, parser, repository, project_dir, regex_pattern):
+    branch, message, name = parser(data)
+    if 'master' not in branch:
         return
 
-    message = '[AUTO] :triumph: clang-format'
-    ignored = True
-    for commit in data['commits']:
-        if not message in commit['message']:
-            ignored = False
-    if ignored:
+    if COMMIT_MESSAGE in message:
         return
 
-    repo_name = data['repository']['full_name']
-    if repo_name != repository:
+    if name != repository:
         return;
 
+    # Perform: fetch, merge, format, stage, commit and push.
     subprocess.Popen(['git', 'fetch'], cwd=project_dir).wait()
     subprocess.Popen(['git', 'merge'], cwd=project_dir).wait()
     run_clang_format(project_dir, regex_pattern)
@@ -65,7 +78,7 @@ def process_data(data, repository, project_dir, regex_pattern):
         'git',
         'commit',
         '-m',
-        '\'%s\'' % message
+        '\'%s\'' % COMMIT_MESSAGE
     ], cwd=project_dir).wait()
     subprocess.Popen(['git', 'push'], cwd=project_dir).wait()
 
@@ -101,16 +114,32 @@ def make_handler_class(callback):
 
     return MyHandler
 
-def run_server(callback):
+def run_server(port, callback):
     try:
-        server = BaseHTTPServer.HTTPServer(('', 2233), make_handler_class(callback))
+        server = BaseHTTPServer.HTTPServer(('', port), make_handler_class(callback))
         server.serve_forever()
     except KeyboardInterrupt:
         print '^C received, shutting down the web server'
         pass
     server.server_close()
 
+def run_github_server():
+    thread = threading.Thread(target=run_server, args=(2233, lambda data:
+        process_data(data, parse_github_data, 'Senspark/ee-x', '/Volumes/DATA/Repository/senspark/ee-x', r'.*\.(cpp|hpp|h|mm|m)$')
+    ))
+    return thread
+
+def run_bitbucket_server():
+    thread = threading.Thread(target=run_server, args=(2232, lambda data:
+        # process_data(data, parse_bitbucket_data, 'enrevol/hook-test',         '/Volumes/DATA/Repository/enrevol/hook-test',         r'.*\.(cpp|hpp|h|mm|m)$')
+        process_data(data, parse_bitbucket_data, 'senspark/gold-miner-vegas', '/Volumes/DATA/Repository/senspark/gold-miner-vegas', r'.*\.(cpp|hpp|h|mm|m)$')
+    ))
+    return thread
+
 if __name__ == '__main__':
-    run_server(lambda data:
-        process_data(data, 'Senspark/ee-x', '/Volumes/DATA/Repository/senspark/ee-x', r'.*\.(cpp|hpp|h|mm|m)$')
-    )
+    t0 = run_github_server()
+    t1 = run_bitbucket_server()
+    t0.start()
+    t1.start()
+    t0.join()
+    t1.join()
