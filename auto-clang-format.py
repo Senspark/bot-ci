@@ -14,6 +14,7 @@ COMMIT_MESSAGE = '[AUTO] :triumph: clang-format'
 def run_clang_format(project_dir, regex_pattern):
     args0 = [
         'git',
+        '--no-pager',
         'diff',
         'HEAD^',
         'HEAD'
@@ -35,12 +36,12 @@ def run_clang_format(project_dir, regex_pattern):
     print 'full command line = %s' % (' '.join(args0 + ['|'] + args1))
 
     p0 = subprocess.Popen(args0, cwd=project_dir, stdout=subprocess.PIPE)
-    p0.wait()
     # print 'result = %s' % p0.communicate()[0]
 
     # Pass output from git diff to clang-format-diff.
     p1 = subprocess.Popen(args1, cwd=project_dir, stdin=p0.stdout, stdout=subprocess.PIPE)
     p0.stdout.close()
+    p0.wait()
     p1.wait()
 
     print 'clang-format-diff command line = %s' % subprocess.list2cmdline(args1)
