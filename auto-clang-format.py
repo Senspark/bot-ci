@@ -59,15 +59,15 @@ def parse_bitbucket_data(data):
     name = data['repository']['full_name']
     return branch, message, name
 
-def process_data(data, parser, repository, project_dir, regex_pattern):
-    branch, message, name = parser(data)
-    if 'master' not in branch:
+def process_data(data, parser, branch, repository, project_dir, regex_pattern):
+    parsed_branch, parsed_message, parsed_repository = parser(data)
+    if branch not in parsed_branch:
         return
 
-    if COMMIT_MESSAGE in message:
+    if COMMIT_MESSAGE in parsed_message:
         return
 
-    if name != repository:
+    if parsed_repository != repository:
         return;
 
     # Perform: fetch, merge, format, stage, commit and push.
@@ -124,18 +124,19 @@ def run_server(port, callback):
         pass
     server.server_close()
 
+def process_github_repo(data):
+    process_data(data, parse_github_data, 'master', 'Senspark/ee-x', '/Volumes/DATA/Repository/senspark/ee-x', r'.*\.(cpp|hpp|h|mm|m)$')
+
+def process_bitbucket_repo(data):
+    # process_data(data, parse_bitbucket_data, 'enrevol/hook-test',         '/Volumes/DATA/Repository/enrevol/hook-test',         r'.*\.(cpp|hpp|h|mm|m)$')
+    process_data(data, parse_bitbucket_data, 'master',  'senspark/gold-miner-vegas', '/Volumes/DATA/Repository/senspark/gold-miner-vegas', r'.*\.(cpp|hpp|h|mm|m)$')
+    process_data(data, parse_bitbucket_data, 'develop', 'senspark/tienlen',          '/Volumes/DATA/Repository/senspark/gold-miner-vegas', r'.*\.(cpp|hpp|h|mm|m)$')
+
 def run_github_server():
-    thread = threading.Thread(target=run_server, args=(2233, lambda data:
-        process_data(data, parse_github_data, 'Senspark/ee-x', '/Volumes/DATA/Repository/senspark/ee-x', r'.*\.(cpp|hpp|h|mm|m)$')
-    ))
-    return thread
+    return threading.Thread(target=run_server, args=(2233, process_github_repo))
 
 def run_bitbucket_server():
-    thread = threading.Thread(target=run_server, args=(2232, lambda data:
-        # process_data(data, parse_bitbucket_data, 'enrevol/hook-test',         '/Volumes/DATA/Repository/enrevol/hook-test',         r'.*\.(cpp|hpp|h|mm|m)$')
-        process_data(data, parse_bitbucket_data, 'senspark/gold-miner-vegas', '/Volumes/DATA/Repository/senspark/gold-miner-vegas', r'.*\.(cpp|hpp|h|mm|m)$')
-    ))
-    return thread
+    return threading.Thread(target=run_server, args=(2232, process_bitbucket_repo))
 
 if __name__ == '__main__':
     t0 = run_github_server()
